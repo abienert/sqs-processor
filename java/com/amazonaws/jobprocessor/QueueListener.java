@@ -130,9 +130,12 @@ public class QueueListener {
         log.info("Connecting to job results queue " + jobResultsQueueName);
         MessageQueue resultsQueue = SQSUtils.connectToQueue(jobResultsQueueName, awsAccessKeyId,
                 secretAccessKey);
+        resultsQueue.setEncoding(false);
+        
         log.info("Connecting to dead letter queue " + deadLetterQueueName);
         MessageQueue deadLetterQueue = SQSUtils.connectToQueue(deadLetterQueueName, awsAccessKeyId,
                 secretAccessKey);
+        deadLetterQueue.setEncoding(false);
 
         // Create the QueueListener
         return new QueueListener(backlogQueue, resultsQueue, deadLetterQueue, pollRatePerMin,
