@@ -1,0 +1,85 @@
+#!/usr/bin/ruby
+
+#
+# This script parses the EC2 instance configuration specified at launch. Since
+# there are defaults, the only required parameters are access_key_id and
+# secret_access_key.
+#
+# To create your own job processor logic, subclass com.amazonaws.jobprocessor.JobExecutor,
+# put the jar in the lib/ directory with the QueueListener jar (or modify this
+# script to put it on the classpath), build your AMI, and specify the full class
+# name with the job_executor launch parameter.
+#
+# For example, using the EC2 commandline tools with your own JobExecutor
+# deployed to your own AMI, you would launch it as follows:
+#
+#   ec2-run-instances <AMI ID> -k gsg-keypair -d "access_key_id=<Access Key ID>,secret_access_key=<Secret Access Key>,job_executor=mypackage.MyJobExecutor"
+#
+
+require 'net/http'
+require 'uri'
+
+DEFAULTS = {
+  'job_backlog_queue_name'              => 'SQS-EC2-Queue-Todo',
+  'results_queue_name'                  => 'SQS-EC2-Queue-Results',
+  'dead_letter_queue_name'              => 'SQS-EC2-Queue-Dead-letter',
+  'poll_rate_per_min'                   => '600', # poll every 1/10 of a second
+  'expected_job_execution_time_in_secs' => '30',  # expect each job to take 30 seconds
+  'job_failure_retries'                 => '1',   # retry a failed job once
+  'job_executor'                        => 'com.amazonaws.jobprocessor.executors.ReverseSpacelessString'
+}
+
+def get_ec2_user_data
+  # This is the address an EC2 instance calls to get user-data information
+  response = Net::HTTP.get_response(URI.parse("http://169.254.169.254/1.0/user-data"))
+  case response
+  when Net::HTTPSuccess then 
+    response.body
+  else
+    ""
+  end
+end
+
+# Get job processor basedir from commandline
+if ARGV.size < 1 then
+  $stderr.puts "usage: #{$0} <job processor basedir>"
+  exit
+end
+job_processor_basedir = ARGV[0]
+
+# Get and parse user-data (EC2 launch config)
+config_str = get_ec2_user_data
+config = {}
+config_str.split(',').each{ |s| k,v = s.split('='); config[k] = v; }
+config = DEFAULTS.merge(config)
+
+# Abort if AWS access key id or secret access key were not provided
+if !config.has_key?('access_key_id') || !config.has_key?('secret_access_key') then
+  $stderr.puts "Instance must be launched with at least access_key_id and secret_access_key parameters, but got: \"#{config_str}\""
+  exit
+end
+
+# Prepare Java command to start job processor:
+# 1) construct classpath (add your jars here)
+classpath = [
+             ENV['CLASSPATH'],
+             "#{job_processor_basedir}/conf/",
+             "#{job_processor_basedir}/lib/*" # java 1.6 allows wildcards
+]
+# 2) construct arguments to the job processor
+args = [
+        config['access_key_id'],
+        config['secret_access_key'],
+        config['job_backlog_queue_name'],
+        config['results_queue_name'],
+        config['dead_letter_queue_name'],
+        config['poll_rate_per_min'],
+        config['expected_job_execution_time_in_secs'],
+        config['job_failure_retries'],
+        config['job_executor']
+]
+# 3) call java
+cmd = "$JAVA_HOME/bin/java -classpath #{classpath.join(':')} com.amazonaws.jobprocessor.QueueListener #{args.join(' ')}"
+# print the command for logging purposes, but don't print the secret
+puts "Executing '#{cmd.gsub( /#{config['secret_access_key']}/, '*' * config['secret_access_key'].length )}'"
+system(cmd)
