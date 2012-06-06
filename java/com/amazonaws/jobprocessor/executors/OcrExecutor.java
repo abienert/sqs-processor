@@ -27,7 +27,9 @@ public class OcrExecutor implements JobExecutor  {
 			if (returnCode != 0)
 				throw new JobExecutionException("OCR process failed with return code " + returnCode);
 			
-		} catch (IOException | InterruptedException e) {
+		} catch (IOException  e) {
+			throw new JobExecutionException("OCR execution exception: " + e.getMessage());
+		} catch (InterruptedException e) {
 			throw new JobExecutionException("OCR execution exception: " + e.getMessage());
 		}
 		
